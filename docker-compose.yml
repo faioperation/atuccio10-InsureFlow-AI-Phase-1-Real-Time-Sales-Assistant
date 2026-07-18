@@ -1,0 +1,106 @@
+﻿# ==============================================================
+# InsureFlow AI Sales Assistant – Docker Compose (Development)
+# ==============================================================
+# Usage:
+#   docker compose up --build
+#
+# For production, use:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# ==============================================================
+
+services:
+
+  # ── Orchestrator (Twilio + Deepgram bridge) ─────────────────
+  orchestrator:
+    build:
+      context: ./InsureFlow_Orchestrator
+      dockerfile: Dockerfile
+    container_name: insureflow_orchestrator
+    restart: unless-stopped
+    env_file:
+      - ./InsureFlow_Orchestrator/.env
+    environment:
+      PORT: 5050
+    ports:
+      - "5050:5050"
+    networks:
+      - insureflow_net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5050/docs')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── AI Agent (NLU + RAG + Redis + OpenAI) ───────────────────
+  ai_agent:
+    build:
+      context: ./InsureFlow_AI_Agent
+      dockerfile: Dockerfile
+    container_name: insureflow_ai_agent
+    restart: unless-stopped
+    env_file:
+      - ./InsureFlow_AI_Agent/.env
+    environment:
+      AGENT_PORT: 5051
+      # Connect to Orchestrator via Docker network hostname.
+      ORCHESTRATOR_WS_URL: ws://orchestrator:5050/transcript-stream
+    ports:
+      - "5051:5051"
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+    networks:
+      - insureflow_net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5051/docs')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── Frontend (Next.js dashboard) ────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # AI Agent is accessed directly from the browser, so we use
+        # the public-facing URL (localhost in dev, wss://domain in prod).
+        NEXT_PUBLIC_WS_URL: ws://localhost:5051/transcript-stream
+    container_name: insureflow_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      ai_agent:
+        condition: service_healthy
+    networks:
+      - insureflow_net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# ── Network ──────────────────────────────────────────────────
+networks:
+  insureflow_net:
+    driver: bridge
+    name: insureflow_net

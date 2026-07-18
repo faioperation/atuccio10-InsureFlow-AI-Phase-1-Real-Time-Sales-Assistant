@@ -1,0 +1,36 @@
+﻿# ==============================================================
+# InsureFlow AI Sales Assistant – Docker Compose (Development)
+# ==============================================================
+# Adds hot-reload volumes and relaxed healthchecks for local dev.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# ==============================================================
+
+services:
+
+  orchestrator:
+    # Mount source for live reload (requires watchfiles / uvicorn --reload).
+    volumes:
+      - ./InsureFlow_Orchestrator:/app
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "5050", "--reload"]
+    environment:
+      PORT: 5050
+
+  ai_agent:
+    volumes:
+      - ./InsureFlow_AI_Agent:/app
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "5051", "--reload"]
+    environment:
+      AGENT_PORT: 5051
+
+  frontend:
+    build:
+      target: deps           # Only install deps; run Next.js dev server.
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules    # Prevent host node_modules from overwriting.
+      - /app/.next           # Preserve Next.js build cache.
+    command: ["npm", "run", "dev"]
+    environment:
+      NODE_ENV: development
